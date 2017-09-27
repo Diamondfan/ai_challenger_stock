@@ -2,16 +2,17 @@
 #encoding=utf-8
 
 from data.data_loader import *
-from model import Model
+from model import Model, RNNModel
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import time
 import numpy as np
+import sys
 
 USE_CUDA=True
 
-def train(train_dataloader, model, optimizer, loss_fn, print_every=50):
+def train(train_dataloader, model, optimizer, loss_fn, print_every=80):
     model.train()
     
     total_loss = 0
@@ -27,8 +28,9 @@ def train(train_dataloader, model, optimizer, loss_fn, print_every=50):
             labels = labels.cuda()
 
         outputs = model(inputs)
-        
+
         #batch_size = len(outputs)
+        #loss = get_sequence_loss(outputs, labels, loss_fn)
         loss = loss_fn(outputs, labels)
         #for x in range(batch_size):
         #    loss += weights[x]*loss_fn(outputs[x].view(1, -1), labels[x])
@@ -65,10 +67,10 @@ def dev(dev_dataloader, model, loss_fn):
             labels = labels.cuda()
 
         outputs = model(inputs)
-        
-        pred = torch.max(outputs, 1)[1]
-        num_correct = (pred == labels).sum()
-        batch_size = len(outputs)
+        batch_size=len(outputs)
+        #num_correct = get_sequence_acc(outputs, labels)
+        #loss = get_sequence_loss(outputs, labels, loss_fn)
+        num_correct = (torch.max(outputs, 1)[1] == labels).sum()
         loss = loss_fn(outputs, labels)
         #for x in range(batch_size):
         #    loss += weights[x]*loss_fn(outputs[x].view(1, -1), labels[x])
@@ -78,9 +80,26 @@ def dev(dev_dataloader, model, loss_fn):
         i += 1
     return total_loss / i, total_acc / i
 
+def get_sequence_loss(outputs, labels, loss_fn):
+    batch_size, window, feat_size = outputs.size()
+    outputs = outputs.view(-1, feat_size)
+    batch_size, window = labels.size()
+    labels = labels.view(-1)
+    loss = loss_fn(outputs, labels)
+    return loss
+
+def get_sequence_acc(outputs, labels):
+    batch_size, window, feat_size = outputs.size()
+    outputs = outputs.view(-1, feat_size)
+    batch_size, window = labels.size()
+    labels = labels.view(-1)
+    pred = torch.max(outputs, 1)[1]
+    num_correct = (pred == labels).sum()
+    return float(num_correct.data[0]) / (window*batch_size)
+
 def main():
 
-    num_epoches = 100
+    num_epoches = 50
     least_train_epoch = 30
     end_ajust_loss = 0.1
     loss_best = 100
@@ -92,30 +111,36 @@ def main():
     adjust_rate_flag = False
     stop_train = False
     adjust_time = 0
+    model_type = 'linear'
     
     from visdom import Visdom
     viz = Visdom(env='fan')
-    opts = [dict(title="stock training loss 20170916", ylabel='Loss', xlabel='Epoch'),
-            dict(title="stock dev loss 20170916", ylabel='Loss', xlabel='Epoch'),
-            dict(title="stock dev acc 20170916", ylabel='acc', xlabel='Epoch')]
+    opts = [dict(title="stock training loss 20170923", ylabel='Loss', xlabel='Epoch'),
+            dict(title="stock dev loss 20170923", ylabel='Loss', xlabel='Epoch'),
+            dict(title="stock dev acc 20170923", ylabel='acc', xlabel='Epoch')]
     viz_window = [None, None, None]
     
     #加在数据集
-    train_dataset = myDataset(date='20170916/', data_set="train", n_feats=88)
+    train_dataset = myDataset(date='20170923/', data_set="train", n_feats=88, window=None)
     train_dataloader = myDataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                     num_workers=4, pin_memory=False)
-    dev_dataset = myDataset(date='20170916/', data_set='dev', n_feats=88)
+    dev_dataset = myDataset(date='20170923/', data_set='dev', n_feats=88, window=None)
     dev_dataloader = myDataLoader(dev_dataset, batch_size=batch_size, shuffle=False,
                                     num_workers=4, pin_memory=False)
     
     #模型，目标函数，优化器定义 
     input_size = train_dataset.n_feats
     num_class = 2
-    model = Model(net=[input_size, 16, 8, 4, num_class], dropout=0.4, bias=True)
+    if model_type != 'rnn':
+        model = Model(net1=[input_size, 128, 88], net2=[16, 8, 4, num_class], dropout=0, bias=False)
+        loss_fn = nn.NLLLoss()
+    else:
+        model = RNNModel(rnn_input_size=input_size, rnn_hidden_size=8, rnn_layers=4,
+                        rnn_type=nn.LSTM, bidirectional=True, batch_norm=True, dropout=0.2)
+        loss_fn = nn.NLLLoss()
     if USE_CUDA:
         model = model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=init_lr, weight_decay = weight_decay)
-    loss_fn = nn.NLLLoss()
 
     #开始迭代
     start_time = time.time()
@@ -164,6 +189,10 @@ def main():
 
     print("End training.")
     best_path = './log/best_model_cv'+str(loss_best)+'.pkl'
-    torch.save(best_model.save_package(best_model, optimizer, loss_results=train_loss, training_cer_results=dev_loss, dev_cer_results=dev_acc) , best_path)
+    params = dict()
+    params['model_type'] = model_type
+    torch.save(best_model.save_package(best_model, optimizer, epoch=params, train_loss_results=train_loss, dev_loss_results=dev_loss, dev_acc_results=dev_acc) , best_path)
+
+
 if __name__ == '__main__':
     main()

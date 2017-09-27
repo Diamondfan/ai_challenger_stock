@@ -152,7 +152,7 @@ def sequence_input(batch):
         labels = []
         weights = []
         for x in range(batch_size):
-            sample, weight, label = batch[x]
+            sample, label, weight = batch[x]
             feature = torch.FloatTensor(sample)
             inputs[x].copy_(feature)
             labels.append(label)
@@ -184,14 +184,14 @@ class myDataLoader(DataLoader):
             self.collate_fn = sequence_input
 
 if __name__ == '__main__':
-    dev_dataset = myDataset(date='20170916/sequence', data_set='test', n_feats=88, window=5)
-    for i in range(len(dev_dataset)):
-        if 501554 in dev_dataset[i][1]:
-            print('yes')
-    print('no')
-    print(len(dev_dataset))
-    #dev_loader = myDataLoader(dev_dataset, batch_size=4, shuffle=True, 
-    #                 num_workers=4, pin_memory=False)
+    dev_dataset = myDataset(date='20170916/sequence', data_set='train', n_feats=88, window=None)
+    #for i in range(len(dev_dataset)):
+    #    if 501554 in dev_dataset[i][1]:
+    #        print('yes')
+    #print('no')
+    #print(len(dev_dataset))
+    dev_loader = myDataLoader(dev_dataset, batch_size=4, shuffle=True, 
+                     num_workers=4, pin_memory=False)
     #i = 0
     #for data in dev_loader:
     #    if i == 0:
